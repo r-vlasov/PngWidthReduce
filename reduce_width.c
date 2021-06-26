@@ -153,17 +153,10 @@ create_paths(int** weights, PNG_NODE_PATH** paths, int height, int width)
 	
 
 int*
-find_min_path(int** weights, int height, int width)
+find_min_path(PNG_NODE_PATH** path, int** weights, int* min_path_idxs, int height, int width)
 {
-	PNG_NODE_PATH** path = (PNG_NODE_PATH**) malloc(sizeof(PNG_NODE_PATH*) * height);
-	for (int i = 0; i < height; i++)
-	{
-		path[i] = (PNG_NODE_PATH*) malloc(sizeof(PNG_NODE_PATH) * width);
-	}
-
 	create_paths(weights, path, height, width);
 	
-	int* min_path_idxs = (int*) malloc(sizeof(int) * height);
 	min_path_idxs[0] = find_min_idx(path[0], width);
 	int tmp = min_path_idxs[0];
 
@@ -172,9 +165,6 @@ find_min_path(int** weights, int height, int width)
 		min_path_idxs[i] = path[i - 1][tmp].prev_point;
 		tmp = min_path_idxs[i];
 	}
-	for (int i = 0; i < height; i++)
-		free(path[i]);
-	free(path);
 	return min_path_idxs;
 }
 
@@ -185,34 +175,6 @@ typedef struct
 	int B;
 } RGB_STRUCT;
 
-/*
-int
-metric(RGB_STRUCT** rgb, int x, int y, int height, int width)
-{
-	int m = 0;
-	int mr = 0, mg = 0, mb = 0;
-	for (int i = -1; i <= 1; i++)
-	{
-		for (int j = -1; j <= 1; j++)
-		{
-			if 	((x + i) >= 0 && (x + i) <= height - 1 &&
-				((y + j) >= 0 && (y + j) <= width - 1))
-			{
-				mr = (rgb[x + i][y + j].R - rgb[x][y].R);
-				mr *= 2;
-
-				mg = (rgb[x + i][y + j].G - rgb[x][y].G);
-				mg *= 2;
-
-				mb = (rgb[x + i][y + j].B - rgb[x][y].B);
-				mb *= 2;
-				m += mr + mg + mb;
-			}
-		}
-	}
-	return m;
-}
-*/
 
 int
 metric(png_bytep* rows, int x, int y, int height, int width)
@@ -227,16 +189,16 @@ metric(png_bytep* rows, int x, int y, int height, int width)
 			if 	((x + i) >= 0 && (x + i) <= height - 1 &&
 				((y + j) >= 0 && (y + j) <= width - 1))
 			{
-				p1 = &rows[x + i][4 + (y + j)];
+				p1 = &rows[x + i][4 * (y + j)];
 				p2 = &rows[x][4 * y];
 
-				mr = (p1[0] - p2[0]);
+				mr = (p1[0] * p1[3] - p2[0] * p2[3]);
 				mr *= mr;
 
-				mg = (p1[1] - p2[1]);
+				mg = (p1[1] * p1[3] - p2[1] * p2[3]);
 				mg *= mg;
 
-				mb = (p1[2] - p2[2]);
+				mb = (p1[2] * p1[3] - p2[2] * p2[3]);
 				mb *= mb;
 
 				m += mr + mg + mb;
@@ -248,29 +210,9 @@ metric(png_bytep* rows, int x, int y, int height, int width)
 void
 fill_weights(png_bytep* rows, int** weights, int height, int width)
 {
-/*	RGB_STRUCT** rgb = (RGB_STRUCT**) malloc(sizeof(RGB_STRUCT*) * height);
-	for (int i = 0; i < height; i++)
-		rgb[i] = (RGB_STRUCT*) malloc(sizeof(RGB_STRUCT) * width);
-	for (int i = 0; i < height; i++)
-	{
-		png_bytep row = rows[i];
-		for (int j = 0; j < width; j++)
-		{
-			png_bytep px = &(row[j * 4]);
-			rgb[i][j].R = px[0];
-			rgb[i][j].G = px[1];
-			rgb[i][j].B = px[2];
-		}
-	}
-*/
 	for (int i = 0; i < height; i++)
 		for (int j = 0; j < width; j++)
 			weights[i][j] = metric(rows, i, j, height, width);
-/*
-	for (int i = 0; i < height; i++)
-		free(rgb[i]);
-	free(rgb);
-*/
 }
 
 int
@@ -282,15 +224,13 @@ reduce_width(READ_PNG_STRUCT *png, int* dropper)
 	for (int i = 0; i < png->height; i++)
 		printf("%d ; ", dropper[i]);
 	printf("\n\n");
+
 	for (int i = 0; i < png->height; i++)
 	{
 		png_bytep row = png->rows[i];
     	for (int j = 0; j < png->width; j++)
 		{
-			if(j <= dropper[i])
-			{
-				continue;
-			}
+			png_bytep px = &(row[(j * 4)]);
 			if (j > dropper[i])
 			{
 				png_bytep px = &(row[(j - 1) * 4]);
@@ -298,7 +238,7 @@ reduce_width(READ_PNG_STRUCT *png, int* dropper)
 				px[0] = px2[0];
 				px[1] = px2[1];
 				px[2] = px2[2];
-//				px[3] = px2[3];
+				px[3] = px2[3];
 	   		}
     	}
 	}
@@ -339,8 +279,8 @@ void write_png_file(char *filename, READ_PNG_STRUCT* rpng) {
   png_write_info(png, info);
 
   // To remove the alpha channel for PNG_COLOR_TYPE_RGB format,
-  // Use png_set_filler().
-//  png_set_filler(png, 0, PNG_FILLER_AFTER);
+  // Use png_set_filler()./  
+	//png_set_filler(png, 0, PNG_FILLER_AFTER);
 
   if (!rpng->rows) abort();
 
@@ -352,6 +292,19 @@ void write_png_file(char *filename, READ_PNG_STRUCT* rpng) {
   png_destroy_write_struct(&png, &info);
 }
 
+
+void
+free_alloced_main(PNG_NODE_PATH** paths, int** weights, int* min_path, int height, int width)
+{
+	for (int i = 0; i < height; i++)
+	{
+		free(paths[i]);
+		free(weights[i]);
+	}
+	free(paths);
+	free(weights);
+	free(min_path);
+}
 
 
 int
@@ -368,19 +321,26 @@ main(int argc, char** argv)
 	READ_PNG_STRUCT png = read_png(argv[1]);
 	int cnt_iters = png.width * (100 - perc) / 100;
 	
+	PNG_NODE_PATH** path = (PNG_NODE_PATH**) malloc(sizeof(PNG_NODE_PATH*) * png.height);
+	for (int i = 0; i < png.height; i++)
+	{
+		path[i] = (PNG_NODE_PATH*) malloc(sizeof(PNG_NODE_PATH) * png.width);
+	}
+
 	int** weights = (int**) malloc(sizeof(int*) * png.height);
 	for (int i = 0; i < png.height; i++)
 		weights[i] = (int*) malloc(sizeof(int) * png.width);
-	int* min_path;
+	int* min_path = (int*) malloc(sizeof(int) * png.height);
 
 	for (int i = 0; i < cnt_iters; i++)
 	{
 		fprintf(stderr, "... reduction : %d\n", i);
 		fill_weights(png.rows, weights, png.height, png.width);
 
-		min_path = find_min_path(weights, png.height, png.width);
+		find_min_path(path, weights, min_path, png.height, png.width);
 		if (reduce_width(&png, min_path))
 			abort();
 	}
 	write_png_file(argv[2], &png);
+	free_alloced_main(path, weights, min_path, png.height, png.width);
 }
