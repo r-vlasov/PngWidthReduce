@@ -1,10 +1,76 @@
+/* Vlasov Roman. June 2021 */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <png.h>
+#include <string.h>
 
 #include "include/format.h"
+#include "include/macros.h"
+
 #define CHECK_PNG_HEADER_SIZE 8
 
+
+// struct related to input argument line
+typedef struct
+{
+	int correction;
+	char* input;
+	char* output;
+	int percent;	
+} CMD_LINE_STRUCT;
+
+// cmdline parsing
+CMD_LINE_STRUCT
+parse_argv_line(int argc, char** argv)
+{
+	if (argc != 4 && argc != 5)
+	{
+		fprintf(stderr, "Usage: ./exe [--correct] input.png output.png percentage");
+		exit(0);
+	}
+	if (argc == 4)
+	{
+		CMD_LINE_STRUCT cls = {
+			.correction = WITHOUT_CORRECTION,
+			.input = argv[1],
+			.output = argv[2]
+		};
+		int perc = atoi(argv[3]);
+		if (perc > 0 && perc <= 100)
+			cls.percent = perc;	
+		else
+		{
+			fprintf(stderr, "invalid percentage\n");
+			abort();
+		}
+		return cls;
+	}
+	else
+	{
+		if (strncmp(argv[1], "--correct", strlen("--correct")))
+		{
+			fprintf(stderr, "Invalid first argument\n");
+			abort();
+		}
+		CMD_LINE_STRUCT cls = {
+			.correction = WITH_CORRECTION,
+			.input = argv[2],
+			.output = argv[3]
+		};
+		int perc = atoi(argv[4]);
+		if (perc > 0 && perc <= 100)
+			cls.percent = perc;	
+		else
+		{
+			fprintf(stderr, "invalid percentage\n");
+			abort();
+		}
+		return cls;
+	}
+}
+
+// check if input file is png
 int
 check_png(FILE* fp)
 {
@@ -16,7 +82,7 @@ check_png(FILE* fp)
 	return 0;
 }
 
-
+// struct that returned after reading file
 typedef struct
 {
 	int height;
@@ -25,12 +91,17 @@ typedef struct
 	int color_type;
 	int bit_depth;
 	png_bytep (*get_pixel) (png_bytep, int);
-	int (*metric) (png_bytep*, int, int, int, int);
+	int (*metric) (png_bytep*, int, int, int, int, int);
+	void (*change_pixel) (png_bytep, png_bytep);
+	int correction;
 } READ_PNG_STRUCT;
-	
+
+
+// reading function	
 READ_PNG_STRUCT
-read_png(char *name)
+read_png(char *name, int correction)
 {
+	printf("--- Start reading ---\n");
 	FILE* fp = fopen(name, "rb");
 	if (!fp)
 	{
@@ -43,8 +114,7 @@ read_png(char *name)
 		exit(-1);
 	}
 	
-	png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-	if (!png)
+	png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL); if (!png)
 	{
 		printf("create png error");
 		exit(-1);
@@ -58,7 +128,6 @@ read_png(char *name)
 		exit(-1);
 	}
 
-	/* set error handling for set/longjmp methods of libpng error handling */	
 	if (setjmp(png_jmpbuf(png)))
 		abort();		
 	
@@ -72,10 +141,11 @@ read_png(char *name)
 	int bit_depth = png_get_bit_depth(png, info);
 
 	READ_PNG_STRUCT pngstr = {
-		.height=height,
-		.width=width,
-		.color_type=color_type,
-		.bit_depth=bit_depth
+		.height = height,
+		.width = width,
+		.color_type = color_type,
+		.bit_depth = bit_depth,
+		.correction = correction
 	};	
 
 	fprintf(stdout, "... Reading png with height=%d, width=%d (bitdepth=%d)\n", height, width, bit_depth);
@@ -85,12 +155,14 @@ read_png(char *name)
 		fprintf(stdout, "... color type : RGB\n");
 		pngstr.metric = metric_rgb;
 		pngstr.get_pixel = get_pixel_rgb;
+		pngstr.change_pixel = change_pixel_rgb;
 	}
 	if (color_type == PNG_COLOR_TYPE_RGB_ALPHA)
 	{
 		fprintf(stdout, "... color type : RGBA\n");
 		pngstr.metric = metric_rgba;
 		pngstr.get_pixel = get_pixel_rgba;
+		pngstr.change_pixel = change_pixel_rgba;
 	}
 	if (color_type == (PNG_COLOR_TYPE_GRAY | PNG_COLOR_TYPE_GRAY_ALPHA))
 	{
@@ -121,22 +193,27 @@ read_png(char *name)
 	fclose(fp);
 	png_destroy_read_struct(&png, &info, NULL);
 	
+	printf("--- Finish reading ---\n\n");
 	return pngstr;
 }
 
 
+// struct that describes accumulated weight in dynamic algorithm (path_weight)
+// and
+// previous point in minimal path (prev_point)
 typedef struct
 {
 	int path_weight;
 	int prev_point;
 } PNG_NODE_PATH;
 
+// find index of minimal element of array[0,...,size - 1]
 int
 find_min_idx(PNG_NODE_PATH* array, int size)
 {
 	int min = array[0].path_weight;
 	int idx = 0;
-	int tmp;
+	int tmp = 0;
 
 	for (int i = 1; i < size; i++)
 	{
@@ -150,6 +227,8 @@ find_min_idx(PNG_NODE_PATH* array, int size)
 	return idx;
 }
 
+/* dynamic algorithm to find minimal paths */
+/* algo */
 void 
 fill_row(int** weights, PNG_NODE_PATH** paths, int height, int width, int level)
 {
@@ -157,8 +236,8 @@ fill_row(int** weights, PNG_NODE_PATH** paths, int height, int width, int level)
 	{
 		for (int i = 0; i < width; i++)
 		{
-			paths[level][0].path_weight = weights[level][i];
-			paths[level][0].prev_point = -1;
+			paths[level][i].path_weight = weights[level][i];
+			paths[level][i].prev_point = -1;
 		}
 	}
 	else
@@ -185,7 +264,6 @@ fill_row(int** weights, PNG_NODE_PATH** paths, int height, int width, int level)
 	}
 }
 			
-
 void
 create_paths(int** weights, PNG_NODE_PATH** paths, int height, int width)
 {
@@ -193,7 +271,6 @@ create_paths(int** weights, PNG_NODE_PATH** paths, int height, int width)
 		fill_row(weights, paths, height, width, l);
 }
 	
-
 int*
 find_min_path(PNG_NODE_PATH** path, int** weights, int* min_path_idxs, int height, int width)
 {
@@ -209,7 +286,9 @@ find_min_path(PNG_NODE_PATH** path, int** weights, int* min_path_idxs, int heigh
 	}
 	return min_path_idxs;
 }
+/* end algo */
 
+/* calculate weights of points */
 void
 fill_weights(READ_PNG_STRUCT* png, int** weights)
 {
@@ -219,7 +298,7 @@ fill_weights(READ_PNG_STRUCT* png, int** weights)
 	{
 		for (int y = 0; y < png->width; y++)
 		{
-			weights[x][y] = png->metric(png->rows, x, y, png->height, png->width);
+			weights[x][y] = png->metric(png->rows, x, y, png->height, png->width, png->correction);
 		}
 	}
 }
@@ -238,12 +317,9 @@ reduce_width(READ_PNG_STRUCT *png, int* dropper)
 			png_bytep px = &(row[(j * 4)]);
 			if (j > dropper[i])
 			{
-				png_bytep px = png->get_pixel(row, j - 1);
+				png_bytep px1 = png->get_pixel(row, j - 1);
 				png_bytep px2 = png->get_pixel(row, j);
-				px[0] = px2[0];
-				px[1] = px2[1];
-				px[2] = px2[2];
-				px[3] = px2[3];
+				png->change_pixel(px1, px2);
 	   		}
     	}
 	}
@@ -253,10 +329,11 @@ reduce_width(READ_PNG_STRUCT *png, int* dropper)
 	return -1;
 }
 
-
+// write output
 void 
 write_png_file(char *filename, READ_PNG_STRUCT* rpng)
 {
+	printf("--- Start writing ---\n");
 	FILE *fp = fopen(filename, "wb");
 	if (!fp) 
 		abort();
@@ -292,57 +369,86 @@ write_png_file(char *filename, READ_PNG_STRUCT* rpng)
 	fclose(fp);
 
 	png_destroy_write_struct(&png, &info);
+	printf("--- Stop writing ---\n\n");
 }
 
-
+// memory free
 void
-free_alloced_main(PNG_NODE_PATH** paths, int** weights, int* min_path, int height, int width)
+free_alloced_main(READ_PNG_STRUCT* png, PNG_NODE_PATH** paths, int** weights, int* min_path, int height)
 {
 	for (int i = 0; i < height; i++)
 	{
+		free(png->rows[i]);
 		free(paths[i]);
 		free(weights[i]);
 	}
+	free(png->rows);
 	free(paths);
 	free(weights);
 	free(min_path);
 }
 
-
+// start point
 int
 main(int argc, char** argv)
 {
-	if (argc != 4)
-	{
-		printf("valid args");
-		exit(-1);
-	}
-	int perc = atoi(argv[3]);
-	fprintf(stdout, "Compression = %d perc.\n", perc);
+	CMD_LINE_STRUCT cmd = parse_argv_line(argc, argv);
 
-	READ_PNG_STRUCT png = read_png(argv[1]);
-	int cnt_iters = png.width * (100 - perc) / 100;
+	fprintf(stdout, "Compression = %d perc.\n", cmd.percent);
+
+	READ_PNG_STRUCT png = read_png(cmd.input, cmd.correction);
+	int cnt_iters = png.width * (100 - cmd.percent) / 100;
 	
+	// special for dynamic algorithm
 	PNG_NODE_PATH** path = (PNG_NODE_PATH**) malloc(sizeof(PNG_NODE_PATH*) * png.height);
 	for (int i = 0; i < png.height; i++)
 	{
 		path[i] = (PNG_NODE_PATH*) malloc(sizeof(PNG_NODE_PATH) * png.width);
 	}
 
+	// weights of points
 	int** weights = (int**) malloc(sizeof(int*) * png.height);
-	for (int i = 0; i < png.height; i++)
-		weights[i] = (int*) malloc(sizeof(int) * png.width);
-	int* min_path = (int*) malloc(sizeof(int) * png.height);
-
-	for (int i = 0; i < cnt_iters; i++)
+	if (!weights)
 	{
-		fprintf(stdout, "... reduction : %d\n", i);
+		fprintf(stderr, "malloc error\n");
+		abort();
+	}
+	for (int i = 0; i < png.height; i++)
+	{
+		weights[i] = (int*) malloc(sizeof(int) * png.width);
+		if (!weights[i])
+		{
+			fprintf(stderr, "malloc error\n");
+			abort();
+		}
+	} 
+
+	// deleted path
+	int* min_path = (int*) malloc(sizeof(int) * png.height); 
+	if (!min_path)
+	{
+		fprintf(stderr, "malloc error\n");
+		abort();
+	}
+
+	// delete cnt_iters paths
+	printf("--- Start algorithm ---\n");
+	for (int i = 0; i < cnt_iters; i++) 
+	{
+		if (i % 5 == 0)
+			fprintf(stdout, "... reduction : %d percent\n", i * 100 / cnt_iters);
+		
 		fill_weights(&png, weights);
 
 		find_min_path(path, weights, min_path, png.height, png.width);
 		if (reduce_width(&png, min_path))
 			abort();
 	}
-	write_png_file(argv[2], &png);
-	free_alloced_main(path, weights, min_path, png.height, png.width);
+	printf("--- Finish algorithm ---\n\n");
+
+	// writing and freeing
+	write_png_file(cmd.output, &png);
+	free_alloced_main(&png, path, weights, min_path, png.height);
+	
+	return 0;
 }

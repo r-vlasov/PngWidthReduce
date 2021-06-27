@@ -1,0 +1,7 @@
+#ifndef __MACROS_WIDTH_PNG_REDUCE_H
+#define __MACROS_WIDTH_PNG_REDUCE_H
+
+#define WITH_CORRECTION		1 << 0
+#define WITHOUT_CORRECTION	1 << 1
+
+#endif
