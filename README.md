@@ -1,6 +1,16 @@
-# pngreducer
+# PNG WIDTH REDUCER
+<b>PNG WIDTH REDUCER</b> - программа для "сжатия ширины" png-изображений, используя метод, основанный на динамическом алгоритме поиска минимального маршрута от нижней границы до верхней. <br>
 
-Ссылки про коррекцию:
- - https://habr.com/ru/post/353582/#2
- - http://window.edu.ru/resource/341/65341/files/Zacharov_978-5-94774-906-9/Glava1_cB906-9.pdf
- - https://www.belstu.by/Portals/0/userfiles/87/KONSPEKT-LEKCIJ.pdf
+<b>Поддерживаемый функционал:<b><br>
+
+<b>Вес точки</b> - как в условии (квадрат евклидового расстояния в RGB-пространстве от точки до ее соседей). <br>
+
+<b>Предлагаемые улучшения: <s>(реализованы)</s></b><br>
+	-	Гамма-коррекция
+ 		- https://habr.com/ru/post/353582/#2
+ 		- https://www.belstu.by/Portals/0/userfiles/87/KONSPEKT-LEKCIJ.pdf
+	- 	Вес вклада каждой компоненты R-G-B - уникальный и зависит от светочувствительности "среднего глаза"
+		- http://window.edu.ru/resource/341/65341/files/Zacharov_978-5-94774-906-9/Glava1_cB906-9.pdf
+
+# Использование
+
