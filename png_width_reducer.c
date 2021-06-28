@@ -1,6 +1,5 @@
 /* Vlasov Roman. June 2021 */
-
-#include <stdio.h>
+#include <stdio.h> 
 #include <stdlib.h>
 #include <png.h>
 #include <string.h>
@@ -164,6 +163,19 @@ read_png(char *name, int correction)
 		pngstr.get_pixel = get_pixel_rgba;
 		pngstr.change_pixel = change_pixel_rgba;
 	}
+	if (color_type == PNG_COLOR_TYPE_PALETTE)
+	{
+		fprintf(stdout, "... color type : PALETTE\n");
+		png_set_palette_to_rgb(png);
+		pngstr.metric = metric_rgb;
+		pngstr.get_pixel = get_pixel_rgb;
+		pngstr.change_pixel = change_pixel_rgb;
+		
+		pngstr.color_type = PNG_COLOR_TYPE_RGB;
+		png_set_packing(png);
+		pngstr.bit_depth = 8;
+		png_read_update_info(png, info);
+	}
 	if (color_type == (PNG_COLOR_TYPE_GRAY | PNG_COLOR_TYPE_GRAY_ALPHA))
 	{
 		fprintf(stderr, "png file has unsupported color type (gray)\n");
@@ -185,7 +197,7 @@ read_png(char *name, int correction)
 			abort();
 		}
 	}
-
+	
 	png_read_image(png, row_pointers);
 	pngstr.rows = row_pointers;
 
@@ -358,6 +370,7 @@ write_png_file(char *filename, READ_PNG_STRUCT* rpng)
 					PNG_COMPRESSION_TYPE_DEFAULT,
 					PNG_FILTER_TYPE_DEFAULT
   	);
+	
 	png_write_info(png, info);
 
 	if (!rpng->rows) 
