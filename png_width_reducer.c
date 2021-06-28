@@ -171,9 +171,10 @@ read_png(char *name, int correction)
 
 	// updating read information
 	char* gamma = getenv("GAMMA_CORRECTION");
+	float inv_gamma = 1 / atof(gamma);
 	if (gamma != NULL)
 	{
-		png_set_gamma(png, PNG_GAMMA_LINEAR, atof(gamma));
+		png_set_gamma(png, PNG_GAMMA_LINEAR, inv_gamma);
 		fprintf(stdout, "--- Gamma correction is enabled\n");
 	}
 
@@ -344,7 +345,9 @@ write_transform_gamma_pixels(png_structp png, png_row_infop info, png_bytep data
 	/* Counts the number of zero samples (or zero pixels if color_type is 3 */
 	png_bytep dp = data;
 
-	float inv_gamma = atof(getenv("GAMMA_CORRECTION"));
+	// C_initial = C_linear ** inv_gamma;
+	// gamma = 2.4 -> inv_gamma = 1 / 2.4
+	float inv_gamma = 1 / atof(getenv("GAMMA_CORRECTION"));
 
 	if (png == NULL)
 		return;
@@ -366,6 +369,7 @@ write_transform_gamma_pixels(png_structp png, png_row_infop info, png_bytep data
 		}
 	}
 }
+
 // write output
 void 
 write_png_file(char *filename, READ_PNG_STRUCT* rpng)
