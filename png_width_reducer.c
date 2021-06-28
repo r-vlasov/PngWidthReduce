@@ -1,23 +1,15 @@
 /* Vlasov Roman. June 2021 */
+
 #include <stdio.h> 
 #include <stdlib.h>
 #include <png.h>
 #include <string.h>
+#include <math.h>
 
+
+#include "include/struct.h"
 #include "include/format.h"
 #include "include/macros.h"
-
-#define CHECK_PNG_HEADER_SIZE 8
-
-
-// struct related to input argument line
-typedef struct
-{
-	int correction;
-	char* input;
-	char* output;
-	int percent;	
-} CMD_LINE_STRUCT;
 
 // cmdline parsing
 CMD_LINE_STRUCT
@@ -81,21 +73,6 @@ check_png(FILE* fp)
 	return 0;
 }
 
-// struct that returned after reading file
-typedef struct
-{
-	int height;
-	int width;
-	png_bytep* rows;
-	int color_type;
-	int bit_depth;
-	png_bytep (*get_pixel) (png_bytep, int);
-	int (*metric) (png_bytep*, int, int, int, int, int);
-	void (*change_pixel) (png_bytep, png_bytep);
-	int correction;
-} READ_PNG_STRUCT;
-
-
 // reading function	
 READ_PNG_STRUCT
 read_png(char *name, int correction)
@@ -139,6 +116,17 @@ read_png(char *name, int correction)
 	int color_type = png_get_color_type(png, info);
 	int bit_depth = png_get_bit_depth(png, info);
 
+	if (bit_depth <= 4)
+	{
+		png_set_packing(png); // 1,2,4 bytes -> 8
+		bit_depth = 8;
+	}
+	if (bit_depth == 16)
+	{
+		png_set_strip_16(png);
+		bit_depth = 8;
+	}
+
 	READ_PNG_STRUCT pngstr = {
 		.height = height,
 		.width = width,
@@ -152,6 +140,7 @@ read_png(char *name, int correction)
 	if (color_type == PNG_COLOR_TYPE_RGB)
 	{
 		fprintf(stdout, "... color type : RGB\n");
+
 		pngstr.metric = metric_rgb;
 		pngstr.get_pixel = get_pixel_rgb;
 		pngstr.change_pixel = change_pixel_rgb;
@@ -159,6 +148,7 @@ read_png(char *name, int correction)
 	if (color_type == PNG_COLOR_TYPE_RGB_ALPHA)
 	{
 		fprintf(stdout, "... color type : RGBA\n");
+
 		pngstr.metric = metric_rgba;
 		pngstr.get_pixel = get_pixel_rgba;
 		pngstr.change_pixel = change_pixel_rgba;
@@ -166,21 +156,28 @@ read_png(char *name, int correction)
 	if (color_type == PNG_COLOR_TYPE_PALETTE)
 	{
 		fprintf(stdout, "... color type : PALETTE\n");
+
 		png_set_palette_to_rgb(png);
 		pngstr.metric = metric_rgb;
 		pngstr.get_pixel = get_pixel_rgb;
 		pngstr.change_pixel = change_pixel_rgb;
-		
 		pngstr.color_type = PNG_COLOR_TYPE_RGB;
-		png_set_packing(png);
-		pngstr.bit_depth = 8;
-		png_read_update_info(png, info);
 	}
 	if (color_type == (PNG_COLOR_TYPE_GRAY | PNG_COLOR_TYPE_GRAY_ALPHA))
 	{
 		fprintf(stderr, "png file has unsupported color type (gray)\n");
 		abort();
 	}
+
+	// updating read information
+	char* gamma = getenv("GAMMA_CORRECTION");
+	if (gamma != NULL)
+	{
+		png_set_gamma(png, PNG_GAMMA_LINEAR, atof(gamma));
+		fprintf(stdout, "--- Gamma correction is enabled\n");
+	}
+
+	png_read_update_info(png, info);
 
 	png_bytep* row_pointers = (png_bytep*) malloc(sizeof(png_bytep) * height);
 	if (!row_pointers)
@@ -208,16 +205,6 @@ read_png(char *name, int correction)
 	printf("--- Finish reading ---\n\n");
 	return pngstr;
 }
-
-
-// struct that describes accumulated weight in dynamic algorithm (path_weight)
-// and
-// previous point in minimal path (prev_point)
-typedef struct
-{
-	int path_weight;
-	int prev_point;
-} PNG_NODE_PATH;
 
 // find index of minimal element of array[0,...,size - 1]
 int
@@ -341,6 +328,44 @@ reduce_width(READ_PNG_STRUCT *png, int* dropper)
 	return -1;
 }
 
+void
+write_transform_gamma_pixels(png_structp png, png_row_infop info, png_bytep data)
+{
+	
+	/* Contents of row_info:
+	*  png_uint_32 width      width of row
+	*  png_uint_32 rowbytes   number of bytes in row
+	*  png_byte color_type    color type of pixels
+	*  png_byte bit_depth     bit depth of samples
+	*  png_byte channels      number of channels (1-4)
+	*  png_byte pixel_depth   bits per pixel (depth*channels)
+    */
+
+	/* Counts the number of zero samples (or zero pixels if color_type is 3 */
+	png_bytep dp = data;
+
+	float inv_gamma = atof(getenv("GAMMA_CORRECTION"));
+
+	if (png == NULL)
+		return;
+
+	for (int i = 0; i < info->width; i++)
+	{
+		for (int j = 0; j < info->channels; j++)
+		{
+			if (info->bit_depth == 8)
+			{
+				*dp = pow((float)*dp / 255, inv_gamma) * 255;
+				dp++;
+			}
+			else
+			{
+				fprintf(stderr, "Unhandled bit_depth (output)\n");
+				abort();
+			}
+		}
+	}
+}
 // write output
 void 
 write_png_file(char *filename, READ_PNG_STRUCT* rpng)
@@ -364,14 +389,25 @@ write_png_file(char *filename, READ_PNG_STRUCT* rpng)
 	png_init_io(png, fp);
 
 	png_set_IHDR(	png, info,
-					rpng->width, rpng->height,
-					rpng->bit_depth, rpng->color_type,
+					rpng->width, 
+					rpng->height,
+					rpng->bit_depth, 
+					rpng->color_type,
 					PNG_INTERLACE_NONE,
 					PNG_COMPRESSION_TYPE_DEFAULT,
 					PNG_FILTER_TYPE_DEFAULT
   	);
-	
+		
 	png_write_info(png, info);
+
+	// set_gAMA not working, because it is only change png metadata:(
+	// but i want to change every pixel	
+	char* gamma = getenv("GAMMA_CORRECTION");
+	if (gamma != NULL)
+	{
+		png_set_write_user_transform_fn(png, write_transform_gamma_pixels);
+		fprintf(stdout, "--- Reverse gamma correction\n");
+	}
 
 	if (!rpng->rows) 
 		abort();
