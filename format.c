@@ -6,7 +6,7 @@
 #include "include/macros.h"
 
 int COEF_WITHOUT_CORRECTION[3] = {1, 1, 1};
-int COEF_WITH_CORRECTION[3] = {0.0041, 0.995, 0.023};
+int COEF_WITH_CORRECTION[3] = {1, 1, 1};
 
 // get pixel in rgb color type from row
 png_bytep

@@ -15,50 +15,44 @@
 CMD_LINE_STRUCT
 parse_argv_line(int argc, char** argv)
 {
-	if (argc != 4 && argc != 5)
+	if (argc != 4)
 	{
-		fprintf(stderr, "Usage: ./exe [--correct] input.png output.png percentage");
+		fprintf(stderr, "Usage: ./exe input.png output.png percentage");
 		exit(0);
 	}
-	if (argc == 4)
-	{
-		CMD_LINE_STRUCT cls = {
-			.correction = WITHOUT_CORRECTION,
-			.input = argv[1],
-			.output = argv[2]
-		};
-		int perc = atoi(argv[3]);
-		if (perc > 0 && perc <= 100)
-			cls.percent = perc;	
-		else
-		{
-			fprintf(stderr, "invalid percentage\n");
-			abort();
-		}
-		return cls;
-	}
+
+	CMD_LINE_STRUCT cls = {
+		.correction = WITHOUT_CORRECTION,
+		.input = argv[1],
+		.output = argv[2]
+	};
+
+	int perc = atoi(argv[3]);
+	if (perc > 0 && perc <= 100)
+		cls.percent = perc;	
 	else
 	{
-		if (strncmp(argv[1], "--correct", strlen("--correct")))
-		{
-			fprintf(stderr, "Invalid first argument\n");
-			abort();
-		}
-		CMD_LINE_STRUCT cls = {
-			.correction = WITH_CORRECTION,
-			.input = argv[2],
-			.output = argv[3]
-		};
-		int perc = atoi(argv[4]);
-		if (perc > 0 && perc <= 100)
-			cls.percent = perc;	
-		else
-		{
-			fprintf(stderr, "invalid percentage\n");
-			abort();
-		}
-		return cls;
+		fprintf(stderr, "invalid percentage\n");
+		abort();
 	}
+	
+	char* gamma = getenv("GAMMA_CORRECTION");
+	if (gamma == NULL)
+	{
+		cls.correction = WITHOUT_CORRECTION;
+		cls.gamma = 1;
+	}
+	else 
+	{
+		cls.correction = WITH_CORRECTION;
+		cls.gamma = atof(gamma);
+		if (cls.gamma <= 0)
+		{
+			fprintf(stderr, "invalid gamma value in envvar\n");
+			abort();
+		}
+	}
+	return cls;
 }
 
 // check if input file is png
@@ -75,7 +69,7 @@ check_png(FILE* fp)
 
 // reading function	
 READ_PNG_STRUCT
-read_png(char *name, int correction)
+read_png(char *name, int correction, float gamma)
 {
 	printf("--- Start reading ---\n");
 	FILE* fp = fopen(name, "rb");
@@ -169,15 +163,13 @@ read_png(char *name, int correction)
 		abort();
 	}
 
-	// updating read information
-	char* gamma = getenv("GAMMA_CORRECTION");
-	float inv_gamma = 1 / atof(gamma);
-	if (gamma != NULL)
+	if (correction == WITH_CORRECTION)
 	{
-		png_set_gamma(png, PNG_GAMMA_LINEAR, inv_gamma);
-		fprintf(stdout, "--- Gamma correction is enabled\n");
+		png_set_gamma(png, PNG_GAMMA_LINEAR, 1 / gamma);
+ 		fprintf(stderr, "--- Enable gamma correction while reading\n");
 	}
 
+	// updating read information
 	png_read_update_info(png, info);
 
 	png_bytep* row_pointers = (png_bytep*) malloc(sizeof(png_bytep) * height);
@@ -406,8 +398,7 @@ write_png_file(char *filename, READ_PNG_STRUCT* rpng)
 
 	// set_gAMA not working, because it is only change png metadata:(
 	// but i want to change every pixel	
-	char* gamma = getenv("GAMMA_CORRECTION");
-	if (gamma != NULL)
+	if (rpng->correction == WITH_CORRECTION)
 	{
 		png_set_write_user_transform_fn(png, write_transform_gamma_pixels);
 		fprintf(stdout, "--- Reverse gamma correction\n");
@@ -449,7 +440,7 @@ main(int argc, char** argv)
 
 	fprintf(stdout, "Compression = %d perc.\n", cmd.percent);
 
-	READ_PNG_STRUCT png = read_png(cmd.input, cmd.correction);
+	READ_PNG_STRUCT png = read_png(cmd.input, cmd.correction, cmd.gamma);
 	int cnt_iters = png.width * (100 - cmd.percent) / 100;
 	
 	// special for dynamic algorithm

@@ -10,6 +10,7 @@ typedef struct
 	char* input;
 	char* output;
 	int percent;	
+	int gamma;
 } CMD_LINE_STRUCT;
 
 // struct that returned after reading file
@@ -24,8 +25,7 @@ typedef struct
 	int (*metric) (png_bytep*, int, int, int, int, int);
 	void (*change_pixel) (png_bytep, png_bytep);
 	int correction;
-	png_colorp palette;
-	int num_palette;
+	float gamma;
 } READ_PNG_STRUCT;
 
 
